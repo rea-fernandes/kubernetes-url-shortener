@@ -2,30 +2,47 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import RedirectResponse
 import hashlib
+import os
+import redis
 
 
 app = FastAPI(title="Kubernetes URL Shortener")
+
+
+redis_host = os.getenv("REDIS_HOST", "localhost")
+redis_port = int(os.getenv("REDIS_PORT", "6379"))
+
+r = redis.Redis(
+    host=redis_host,
+    port=redis_port,
+    decode_responses=True
+)
 
 
 class URLRequest(BaseModel):
     url: str
 
 
-urls = {}
-
-
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    try:
+        r.ping()
+        return {"status": "healthy"}
+    except redis.RedisError:
+        raise HTTPException(
+            status_code=503,
+            detail="Redis unavailable"
+        )
 
 
 @app.post("/shorten")
 def shorten_url(request: URLRequest):
+
     short_code = hashlib.md5(
         request.url.encode()
     ).hexdigest()[:6]
 
-    urls[short_code] = request.url
+    r.set(short_code, request.url)
 
     return {
         "short_code": short_code,
@@ -35,10 +52,13 @@ def shorten_url(request: URLRequest):
 
 @app.get("/{short_code}")
 def redirect_url(short_code: str):
-    if short_code not in urls:
+
+    url = r.get(short_code)
+
+    if url is None:
         raise HTTPException(
             status_code=404,
             detail="URL not found"
         )
 
-    return RedirectResponse(url=urls[short_code])
+    return RedirectResponse(url=url)
