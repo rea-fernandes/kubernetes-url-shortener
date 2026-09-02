@@ -1,22 +1,45 @@
 apiVersion: apps/v1
 kind: Deployment
-
 metadata:
-  name: nginx
-
+  name: url-shortener
 spec:
   replicas: 3
 
   selector:
     matchLabels:
-      app: nginx
+      app: url-shortener
 
   template:
     metadata:
       labels:
-        app: nginx
+        app: url-shortener
 
     spec:
       containers:
-        - name: nginx
-          image: nginx
+        - name: url-shortener
+          image: url-shortener:latest
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 8000
+
+          env:
+            - name: REDIS_HOST
+              value: redis-service
+
+            - name: REDIS_PORT
+              value: "6379"
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
