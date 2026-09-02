@@ -23,6 +23,14 @@ spec:
           ports:
             - containerPort: 8000
 
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
           envFrom:
             - configMapRef:
                 name: url-shortener-config
