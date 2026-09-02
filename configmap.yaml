@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: url-shortener-config
+data:
+  REDIS_HOST: redis-service
+  REDIS_PORT: "6379"

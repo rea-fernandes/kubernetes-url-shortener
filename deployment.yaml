@@ -23,12 +23,11 @@ spec:
           ports:
             - containerPort: 8000
 
-          env:
-            - name: REDIS_HOST
-              value: redis-service
-
-            - name: REDIS_PORT
-              value: "6379"
+          envFrom:
+            - configMapRef:
+                name: url-shortener-config
+            - secretRef:
+                name: url-shortener-secret
 
           readinessProbe:
             httpGet:
