@@ -1,0 +1,58 @@
+Thank you for installing {{ .Chart.Name }}.
+
+{{- if .Values.httpRoute.enabled }}
+
+HTTPRoute is enabled.
+
+{{- if .Values.httpRoute.hostnames }}
+Application hostname:
+  {{ (first .Values.httpRoute.hostnames) }}
+{{- end }}
+
+Check the HTTPRoute:
+
+  kubectl get httproute -n {{ .Release.Namespace }}
+
+{{- else if .Values.ingress.enabled }}
+
+Ingress is enabled.
+
+Check the Ingress:
+
+  kubectl get ingress -n {{ .Release.Namespace }}
+
+{{- range $host := .Values.ingress.hosts }}
+Application URL:
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}
+{{- end }}
+
+{{- else }}
+
+The application is deployed as a ClusterIP Service.
+
+Service:
+  {{ include "url-shortener.fullname" . }}:{{ .Values.service.port }}
+
+To access the application locally:
+
+  kubectl port-forward svc/{{ include "url-shortener.fullname" . }} 8000:{{ .Values.service.port }}
+
+Then test:
+
+  curl http://127.0.0.1:8000/health
+
+Create a short URL:
+
+  curl -X POST http://127.0.0.1:8000/shorten \
+    -H "Content-Type: application/json" \
+    -d '{"url":"https://example.com"}'
+
+{{- end }}
+
+Useful commands:
+
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  kubectl get svc {{ include "url-shortener.fullname" . }}
+
+  helm status {{ .Release.Name }}
