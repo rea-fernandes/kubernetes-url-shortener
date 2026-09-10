@@ -45,7 +45,7 @@ The project demonstrates containerization, Kubernetes deployments, service disco
                                ▼
                     ┌─────────────────────┐
                     │    Redis Pod        │
-                    │    + PVC             │
+                    │    + PVC            │
                     └─────────────────────┘
 ```
 
