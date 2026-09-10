@@ -228,181 +228,11 @@ docker compose down
 
 The Compose configuration connects the API to the `redis` service and does not configure Redis authentication.
 
-## Deploy to Kubernetes with manifests
+## Kubernetes Deployment
 
-The raw Kubernetes manifests deploy the application and Redis separately.
+The application is deployed to Kubernetes using **Helm**.
 
-The API image is:
-
-```text
-url-shortener:latest
-```
-
-The manifests use:
-
-```yaml
-imagePullPolicy: Never
-```
-
-This is intended for a local Kubernetes cluster using the same local image store.
-
-### Build the image
-
-Build the image before deploying:
-
-```bash
-docker build -t url-shortener:latest .
-```
-
-If using a local cluster such as Docker Desktop or kind, make sure the image is available to the cluster.
-
-### Apply the manifests
-
-Create the Kubernetes Secret:
-
-```bash
-kubectl apply -f secret.yaml
-```
-
-Create the ConfigMap:
-
-```bash
-kubectl apply -f configmap.yaml
-```
-
-Deploy Redis:
-
-```bash
-kubectl apply -f redis.yaml
-```
-
-Deploy the API:
-
-```bash
-kubectl apply -f deployment.yaml
-```
-
-Create the API Service:
-
-```bash
-kubectl apply -f service.yaml
-```
-
-Create the Ingress:
-
-```bash
-kubectl apply -f ingress.yaml
-```
-
-Or apply all resources individually in the same order:
-
-```bash
-kubectl apply -f secret.yaml
-kubectl apply -f configmap.yaml
-kubectl apply -f redis.yaml
-kubectl apply -f deployment.yaml
-kubectl apply -f service.yaml
-kubectl apply -f ingress.yaml
-```
-
-### Verify the deployment
-
-Check the pods:
-
-```bash
-kubectl get pods
-```
-
-Check services:
-
-```bash
-kubectl get services
-```
-
-Check the Ingress:
-
-```bash
-kubectl get ingress
-```
-
-Check the API:
-
-```bash
-curl http://localhost/health
-```
-
-Create a short URL through the Ingress:
-
-```bash
-curl -X POST http://localhost/shorten \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com"}'
-```
-
-### Redis configuration
-
-The manifest deployment connects to:
-
-```text
-redis-service:6379
-```
-
-Redis authentication is configured using a Kubernetes Secret.
-
-The example Secret contains a local-test password. Replace it before using the deployment outside a local development cluster.
-
-Do not commit production credentials or real secrets to the repository.
-
-## Persistent storage
-
-Redis uses a Kubernetes `PersistentVolumeClaim` with a requested capacity of `1Gi`.
-
-The PVC allows Redis data to survive Redis pod replacement.
-
-Verify the PVC:
-
-```bash
-kubectl get pvc
-```
-
-Example:
-
-```text
-NAME        STATUS   VOLUME   CAPACITY   ACCESS MODES
-redis-pvc   Bound             1Gi        RWO
-```
-
-The storage behavior can be tested by creating a Redis key, deleting the Redis pod, and verifying that the key remains available after the new pod starts.
-
-## Health probes
-
-The API deployment uses Kubernetes health probes to allow Kubernetes to distinguish between healthy and unhealthy containers.
-
-The health endpoint is:
-
-```text
-/health
-```
-
-The endpoint checks Redis connectivity.
-
-This allows Kubernetes to:
-
-* Remove unhealthy pods from Service endpoints
-* Restart containers that become unhealthy
-* Avoid sending traffic to pods that are not ready
-
-Inspect the deployment with:
-
-```bash
-kubectl describe deployment url-shortener
-```
-
-## Helm Deployment
-
-The project includes a Helm chart for deploying the URL Shortener API to Kubernetes.
-
-The Helm chart manages:
+The Helm chart manages the API-side Kubernetes resources:
 
 * API Deployment
 * API Service
@@ -411,21 +241,49 @@ The Helm chart manages:
 * HorizontalPodAutoscaler (HPA)
 * Helm test
 
-**Redis is deployed separately** and must already be available in the cluster as `redis-service`. The Redis password is provided through the `url-shortener-secret` Kubernetes Secret.
+**Redis is deployed separately** because it represents the application's stateful data layer. The API connects to Redis through the Kubernetes Service `redis-service`.
 
-### Install or Upgrade
+### Prerequisites
 
-From the project root:
+The following components are required:
+
+* Kubernetes cluster
+* NGINX Ingress Controller
+* Helm 3
+* Kubernetes Metrics Server for HPA metrics
+* Redis deployed as `redis-service`
+* API container image available to the Kubernetes cluster
+
+### Build the API image
+
+Build the API image using the image name configured in `url-shortener/values.yaml`.
+
+For example:
+
+```bash
+docker build -t url-shortener:latest .
+```
+
+If using a local Kubernetes cluster, make sure the image is available to the cluster before installing the Helm chart.
+
+### Validate the Helm chart
+
+Run Helm linting and template rendering before deployment:
 
 ```bash
 helm lint ./url-shortener
-
 helm template url-shortener ./url-shortener
+```
 
+### Install or upgrade
+
+Install the release, or upgrade it if it already exists:
+
+```bash
 helm upgrade --install url-shortener ./url-shortener
 ```
 
-Check the deployment:
+Check the deployed resources:
 
 ```bash
 kubectl get pods
@@ -434,15 +292,15 @@ kubectl get ingress
 kubectl get hpa
 ```
 
-Check Helm release status:
+Check the Helm release:
 
 ```bash
 helm status url-shortener
 ```
 
-### Access the Application
+### Access the application
 
-The Helm chart exposes the application through an NGINX Ingress using:
+The Helm chart exposes the API through the NGINX Ingress using:
 
 ```text
 http://url-shortener.local
@@ -474,9 +332,60 @@ Example response:
 {"short_code":"c984d0","url":"https://example.com"}
 ```
 
+The short code is deterministic: the same URL produces the same six-character code.
+
+Test the redirect:
+
+```bash
+curl -i http://url-shortener.local/c984d0
+```
+
+### Redis configuration
+
+The API connects to Redis through:
+
+```text
+REDIS_HOST=redis-service
+REDIS_PORT=6379
+```
+
+Redis authentication is configured using the Kubernetes Secret `url-shortener-secret`.
+
+The Redis workload uses a PersistentVolumeClaim so that stored URL mappings survive Redis pod replacement.
+
+Verify the Redis resources:
+
+```bash
+kubectl get pods
+kubectl get service redis-service
+kubectl get pvc
+```
+
+### Health probes
+
+The API deployment uses Kubernetes readiness and liveness probes based on:
+
+```text
+/health
+```
+
+The endpoint checks Redis connectivity.
+
+This allows Kubernetes to:
+
+* Remove unhealthy pods from Service endpoints
+* Restart containers that become unhealthy
+* Avoid sending traffic to pods that are not ready
+
+Inspect the deployment with:
+
+```bash
+kubectl describe deployment url-shortener
+```
+
 ### Helm Test
 
-The chart includes a Helm test that verifies the application Service is reachable from inside the Kubernetes cluster.
+The Helm chart includes a test that verifies that the API Service is reachable from inside the Kubernetes cluster.
 
 Run:
 
@@ -488,6 +397,7 @@ A successful test reports:
 
 ```text
 TEST SUITE:     url-shortener-test-connection
+
 Phase:          Succeeded
 ```
 
@@ -519,46 +429,11 @@ kubectl top pods -l app.kubernetes.io/instance=url-shortener
 
 Metrics Server is required for CPU-based HPA metrics.
 
-The HPA configuration allows Kubernetes to automatically increase or decrease the number of API replicas based on CPU utilization.
+The HPA allows Kubernetes to automatically increase or decrease the number of API replicas based on CPU utilization.
 
-## Horizontal Pod Autoscaling
+### Final Helm validation
 
-The Helm deployment includes a Kubernetes HorizontalPodAutoscaler.
-
-The HPA scales the API Deployment between:
-
-```text
-Minimum replicas: 2
-Maximum replicas: 5
-CPU target: 80%
-```
-
-Check the HPA:
-
-```bash
-kubectl get hpa
-```
-
-Example:
-
-```text
-NAME            REFERENCE                  TARGETS       MINPODS   MAXPODS
-url-shortener   Deployment/url-shortener   cpu: 4%/80%   2         5
-```
-
-CPU utilization is provided by Kubernetes Metrics Server.
-
-Check resource metrics:
-
-```bash
-kubectl top pods
-```
-
-If `kubectl top` does not return metrics, verify that Metrics Server is installed and available in the cluster.
-
-## Validate the Helm chart
-
-The final deployment can be validated with:
+The complete deployment workflow can be validated with:
 
 ```bash
 helm lint ./url-shortener
@@ -583,12 +458,6 @@ curl http://url-shortener.local/health
 curl -X POST http://url-shortener.local/shorten \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com"}'
-```
-
-Expected health response:
-
-```json
-{"status":"healthy"}
 ```
 
 The deployment should show the API pods in `Running` state, the Ingress should expose `url-shortener.local`, and the Helm test should complete successfully.
@@ -767,7 +636,7 @@ kubectl describe ingress url-shortener
 Then test:
 
 ```bash
-curl http://localhost/health
+curl http://url-shortener.local/health
 ```
 
 ### HPA shows `<unknown>`
@@ -837,16 +706,7 @@ Remove the Helm release:
 helm uninstall url-shortener
 ```
 
-Remove the raw Kubernetes resources:
-
-```bash
-kubectl delete -f ingress.yaml
-kubectl delete -f service.yaml
-kubectl delete -f deployment.yaml
-kubectl delete -f redis.yaml
-kubectl delete -f configmap.yaml
-kubectl delete -f secret.yaml
-```
+If Redis is managed separately from Helm, remove its Kubernetes resources only when the stored data is no longer required.
 
 Delete the Redis PVC if the stored data is no longer required:
 
