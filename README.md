@@ -825,4 +825,4 @@ Possible extensions include:
 
 ## License
 
-This project is intended as a portfolio and learning project.
+This project is intended as a portfolio and learning project and licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
