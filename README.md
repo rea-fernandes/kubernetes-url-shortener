@@ -9,53 +9,63 @@ The project demonstrates containerization, Kubernetes deployments, service disco
 ## Architecture
 
 ```text
-                         ┌──────────────────┐
-                         │      Client      │
-                         └────────┬─────────┘
-                                  │
-                                  │ HTTP
-                                  ▼
-                         ┌──────────────────┐
-                         │  NGINX Ingress   │
-                         └────────┬─────────┘
-                                  │
-                                  ▼
-                    ┌──────────────────────────┐
-                    │   FastAPI API Service    │
-                    │      ClusterIP :80       │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────┴─────────────┐
-                    │                          │
-                    ▼                          ▼
-          ┌──────────────────┐       ┌──────────────────┐
-          │   FastAPI Pods   │       │  Redis Service   │
-          │   2–5 replicas   │       │      :6379       │
-          └──────────────────┘       └────────┬─────────┘
-                                              │
-                                              ▼
-                                     ┌──────────────────┐
-                                     │    Redis PVC     │
-                                     │       1 Gi       │
-                                     └──────────────────┘
+                    ┌─────────────────────┐
+                    │       Client        │
+                    └──────────┬──────────┘
+                               │
+                               │ HTTP
+                               ▼
+                    ┌─────────────────────┐
+                    │    NGINX Ingress    │
+                    │ url-shortener.local │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │  Kubernetes Service │
+                    │    ClusterIP :80    │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+                    ▼                     ▼
+             ┌─────────────┐       ┌─────────────┐
+             │ API Pod     │       │ API Pod     │
+             │ FastAPI     │       │ FastAPI     │
+             └──────┬──────┘       └──────┬──────┘
+                    │                     │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │    Redis Service    │
+                    │    :6379            │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │    Redis Pod        │
+                    │    + PVC             │
+                    └─────────────────────┘
 ```
 
-### Kubernetes components
+### Kubernetes Components
 
-The raw Kubernetes manifests deploy:
+| Component             | Purpose                                           |
+| --------------------- | ------------------------------------------------- |
+| FastAPI Deployment    | Runs the URL Shortener API                        |
+| ClusterIP Service     | Provides internal access to API pods              |
+| Redis Deployment      | Stores shortened URLs                             |
+| Redis Service         | Provides internal Redis service discovery         |
+| PersistentVolumeClaim | Provides persistent Redis storage                 |
+| Secret                | Stores the Redis password                         |
+| ConfigMap             | Provides non-sensitive configuration              |
+| NGINX Ingress         | Exposes the API through `url-shortener.local`     |
+| HPA                   | Automatically scales API replicas based on CPU    |
+| Metrics Server        | Provides resource metrics for HPA                 |
+| Helm                  | Packages and manages the API Kubernetes resources |
 
-* FastAPI API Deployment
-* Multiple API replicas
-* ClusterIP Service
-* Redis Deployment
-* Redis ClusterIP Service
-* Redis PersistentVolumeClaim
-* Kubernetes Secret
-* Kubernetes ConfigMap
-* NGINX Ingress
-* Readiness and liveness probes
-
-The Helm chart manages the API-side Kubernetes resources and HPA. Redis is intentionally deployed separately so that the API chart can connect to an existing Redis service.
+The Helm chart manages the API-side Kubernetes resources. Redis remains a separate Kubernetes workload because it represents the application's stateful data layer.
 
 ## Technologies
 
@@ -388,86 +398,128 @@ Inspect the deployment with:
 kubectl describe deployment url-shortener
 ```
 
-## Deploy with Helm
+## Helm Deployment
 
-The Helm chart is located in:
+The project includes a Helm chart for deploying the URL Shortener API to Kubernetes.
 
-```text
-url-shortener/
-```
+The Helm chart manages:
 
-The chart deploys the API-side resources, including:
-
-* FastAPI Deployment
-* Kubernetes Service
+* API Deployment
+* API Service
 * ServiceAccount
 * NGINX Ingress
-* HorizontalPodAutoscaler
+* HorizontalPodAutoscaler (HPA)
+* Helm test
 
-Redis is not deployed by the Helm chart.
+**Redis is deployed separately** and must already be available in the cluster as `redis-service`. The Redis password is provided through the `url-shortener-secret` Kubernetes Secret.
 
-A Redis service and the `url-shortener-secret` Secret must already exist in the target namespace.
+### Install or Upgrade
 
-### Create the Redis Secret
-
-For a local test deployment:
-
-```bash
-kubectl create secret generic url-shortener-secret \
-  --from-literal=REDIS_PASSWORD='change-me'
-```
-
-### Install the Helm chart
+From the project root:
 
 ```bash
-helm install url-shortener ./url-shortener
-```
+helm lint ./url-shortener
 
-### Upgrade an existing installation
+helm template url-shortener ./url-shortener
 
-```bash
-helm upgrade url-shortener ./url-shortener
-```
-
-Or use the recommended install-or-upgrade command:
-
-```bash
 helm upgrade --install url-shortener ./url-shortener
 ```
 
-### Override configuration
-
-The default Helm values expect:
-
-```text
-Redis host: redis-service
-Redis port: 6379
-Ingress host: url-shortener.local
-```
-
-Values can be overridden during installation.
-
-Example:
+Check the deployment:
 
 ```bash
-helm upgrade --install url-shortener ./url-shortener \
-  --set redis.host=my-redis \
-  --set redis.port=6379 \
-  --set ingress.hosts[0].host=url-shortener.local
+kubectl get pods
+kubectl get svc
+kubectl get ingress
+kubectl get hpa
 ```
 
-### Helm values
+Check Helm release status:
 
-The chart defaults to:
+```bash
+helm status url-shortener
+```
+
+### Access the Application
+
+The Helm chart exposes the application through an NGINX Ingress using:
 
 ```text
-API replicas: 3
-Minimum HPA replicas: 2
-Maximum HPA replicas: 5
-CPU target: 80%
-Image: url-shortener:latest
-Image pull policy: Never
+http://url-shortener.local
 ```
+
+Test the health endpoint:
+
+```bash
+curl http://url-shortener.local/health
+```
+
+Expected response:
+
+```json
+{"status":"healthy"}
+```
+
+Create a shortened URL:
+
+```bash
+curl -X POST http://url-shortener.local/shorten \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com"}'
+```
+
+Example response:
+
+```json
+{"short_code":"c984d0","url":"https://example.com"}
+```
+
+### Helm Test
+
+The chart includes a Helm test that verifies the application Service is reachable from inside the Kubernetes cluster.
+
+Run:
+
+```bash
+helm test url-shortener
+```
+
+A successful test reports:
+
+```text
+TEST SUITE:     url-shortener-test-connection
+Phase:          Succeeded
+```
+
+The test pod is created by Helm and remains in the `Completed` state after the test finishes.
+
+### Horizontal Pod Autoscaler
+
+The Helm chart includes a HorizontalPodAutoscaler using CPU utilization.
+
+Configuration:
+
+```text
+Minimum replicas: 2
+Maximum replicas: 5
+CPU target:       80%
+```
+
+Check the HPA:
+
+```bash
+kubectl get hpa url-shortener
+```
+
+View pod resource usage:
+
+```bash
+kubectl top pods -l app.kubernetes.io/instance=url-shortener
+```
+
+Metrics Server is required for CPU-based HPA metrics.
+
+The HPA configuration allows Kubernetes to automatically increase or decrease the number of API replicas based on CPU utilization.
 
 ## Horizontal Pod Autoscaling
 
@@ -506,44 +558,42 @@ If `kubectl top` does not return metrics, verify that Metrics Server is installe
 
 ## Validate the Helm chart
 
-Before installing the chart, validate its syntax:
+The final deployment can be validated with:
 
 ```bash
 helm lint ./url-shortener
-```
-
-Render the Kubernetes manifests without installing them:
-
-```bash
 helm template url-shortener ./url-shortener
-```
-
-Install or upgrade the release:
-
-```bash
 helm upgrade --install url-shortener ./url-shortener
-```
 
-Verify the resulting resources:
-
-```bash
 kubectl get pods
-kubectl get services
+kubectl get svc
 kubectl get ingress
 kubectl get hpa
+
+helm test url-shortener
 ```
 
-Check the Helm release:
+Application-level validation:
 
 ```bash
-helm list
+curl http://url-shortener.local/health
 ```
-
-Get the release status:
 
 ```bash
-helm status url-shortener
+curl -X POST http://url-shortener.local/shorten \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com"}'
 ```
+
+Expected health response:
+
+```json
+{"status":"healthy"}
+```
+
+The deployment should show the API pods in `Running` state, the Ingress should expose `url-shortener.local`, and the Helm test should complete successfully.
+
+> Note: HPA CPU metrics can temporarily display `<unknown>` while Kubernetes is refreshing metrics. Pod-level metrics can be checked independently with `kubectl top pods`.
 
 ## Configuration
 
